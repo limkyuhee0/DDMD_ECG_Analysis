@@ -225,7 +225,105 @@ def p():
     ECG_df['S'] = s_value
     ECG_df['R/S Ratio'] = r_s_ratio
 
+    # Pan-Tompkins 알고리즘 (R 파 검출)
+    def pan_tompkins_detector(ecg_signal):
+        _, results = neurokit2.ecg_peaks(ecg_signal, sampling_rate=500)
+        rpeaks = results["ECG_R_Peaks"]
+        return rpeaks
 
+    # S 파 검출 함수
+    def detect_s_points(ecg_signal, r_peaks, fs):
+        s_points = []
+        for r in r_peaks:
+            search_window = ecg_signal[r:int(r + 0.1 * fs)]  # R 파 이후 100ms 구간 탐색
+            if len(search_window) == 0:
+                continue
+            s_point = np.argmin(search_window) + r  # 최소값의 인덱스를 S 파로 선택
+            s_points.append(s_point)
+        return s_points
+
+    # Q 파 검출 함수
+    def detect_q_points(ecg_signal, r_peaks, fs):
+        q_points = []
+        for r in r_peaks:
+            search_window = ecg_signal[int(r - 0.1 * fs):r]  # R 파 이전 100ms 구간 탐색
+            if len(search_window) == 0:
+                continue
+            q_point = np.argmin(search_window) + (r - len(search_window))  # 최소값의 인덱스를 Q 파로 선택
+            q_points.append(q_point)
+        return q_points
+
+    # R onset 검출 함수
+    def detect_r_onset(ecg_signal, r_peaks, fs):
+        r_onsets = []
+        for r in r_peaks:
+            search_window = ecg_signal[int(r - 0.05 * fs):r]  # R 파 이전 50ms 구간 탐색
+            if len(search_window) == 0:
+                continue
+            r_onset = np.argmax(np.diff(search_window)) + (r - len(search_window))  # 신호 기울기의 최대값을 R onset으로 선택
+            r_onsets.append(r_onset)
+        return r_onsets
+
+    # R offset 검출 함수
+    def detect_r_offset(ecg_signal, r_peaks, fs):
+        r_offsets = []
+        for r in r_peaks:
+            search_window = ecg_signal[r:int(r + 0.05 * fs)]  # R 파 이후 50ms 구간 탐색
+            if len(search_window) == 0:
+                continue
+            r_offset = np.argmax(np.diff(search_window)) + r  # 신호 기울기의 최대값을 R offset으로 선택
+            r_offsets.append(r_offset)
+        return r_offsets
+
+
+    # 모든 리드에 대해 q,r,s 피크
+    for j in ['I','II','III','V1','V2','V3','V4','V5','V6','aVF','aVR','aVL']:
+        r_value = []
+        s_value = []
+        q_value = []
+        r_s_ratio = []
+        q_r_ratio = []
+        for i in tqdm(range(len(ECG_df))):
+            signal = ECG_df['WaveForm'].iloc[i][j]
+            fs = 500
+            ecg_signal = signal
+            y = ecg_signal
+            try:
+                # R 파, S 파, Q 파 검출
+                r_peaks = pan_tompkins_detector(ecg_signal)
+                s_points = detect_s_points(ecg_signal, r_peaks, fs)
+                q_points = detect_q_points(ecg_signal, r_peaks, fs)
+
+                # R, S, Q 값 구하기
+                r_values = [y[i-1] for i in r_peaks]  # i-1 because of zero-based indexing
+                s_values = [y[i-1] for i in s_points]  # i-1 because of zero-based indexing
+                q_values = [y[i-1] for i in q_points]  # i-1 because of zero-based indexing
+
+                # R/S 비율 계산
+                rs_ratio = [r / s if s != 0 else np.nan for r, s in zip(r_values, s_values)]
+                # Q/R 비율 계산
+                qr_ratio = [q / r if r != 0 else np.nan for q, r in zip(q_values, r_values)]
+
+                # 평균값 계산 및 리스트에 추가
+                r_value.append(np.mean(r_values))
+                s_value.append(np.mean(s_values))
+                q_value.append(np.mean(q_values))
+
+                r_s_ratio.append(np.mean(rs_ratio))
+                q_r_ratio.append(np.mean(qr_ratio))
+            except:
+                r_value.append(np.nan)
+                s_value.append(np.nan)
+                q_value.append(np.nan)
+
+                r_s_ratio.append(np.nan)
+                q_r_ratio.append(np.nan)
+
+        # 데이터프레임 업데이트
+        ECG_df['R_'+j] = r_value
+        ECG_df['S_'+j] = s_value
+        ECG_df['Q_'+j] = q_value
+        ECG_df['R/S Ratio_'+j] = r_s_ratio
 
     import os
 
